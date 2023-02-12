@@ -1,0 +1,358 @@
+---
+title: "Seoul Rental Bike Prediction from Weather Data"
+date: "April 10, 2022"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+![](img/bike.jpg)
+
+# Authors and Job Assignments
+
+- Eddie Shin (997743615) - model building, EDA and presentation speaker
+- Jintong (1005933723) - data cleansing and responsible for the final report 
+- Du Han (1005681727) - model building, model diagnostic and presentation Speaker
+- Chenqi () - made PowerPoint slides
+
+\newpage
+
+# 1. Background and Significance
+
+In this project, we are trying to research on how the weather conditions such as humidity, wind speed, Visibility, temperature, dew point temperature influence the bike rental amount in different hours through out the day. In this research we didn't consider the specific days and hours because weather changes could be varied in different hours during the day, however, weather condition could have more power on representing the season's feature. Therefore we omit the dates and hours. Our main research question is whether the weather condition through out the year will influence the bike rental amount. Therefore, we consider to compare the main effect model and main effect with interaction to see whether the weather condition can significantly influence the rental bike amount. 
+The null hypothesis is the weather condition through out the year can influence the bike rental amount.
+
+# 2. Exploratory Data Analysis
+
+```{r, message=FALSE, echo=FALSE}
+library(tidyverse)
+library(readxl)
+library(reshape2)
+library(leaps)
+library(MASS)
+library(lmtest)
+library(ggplot2)
+library(reshape2)
+library(broom)
+library(MPV)
+library(ggpubr)
+library(GGally)
+```
+
+## 2.1 Data Description
+
+```{r, echo=FALSE}
+bike <- read_excel("SeoulBikeData.xlsx", skip=1, 
+                   col_names=c("Date", "BikeCount", "Hour", "Temp", "Humid", "WindSpeed", "Visibility", "DewPointTemp", "SolarRad", "Rainfall", "Snowfall", "Season", "Holiday", "FuncDay"))
+bike <- bike %>% 
+  mutate(FuncDayNumeric = ifelse(FuncDay == "No",0,1),HolidayNumeric = ifelse(Holiday == "No Holiday",0,1))
+```
+
+
+The dataset collect 8760 data from between 2017 to 2018, with different bike rental
+amount in different days during the year and weather condition. In this case study
+The response variable we choose is Rented.Bike.Count and hour. The explanation
+variable we choose is seasons and its corresponding temperature,dew point
+temperature,wind speed,humidity, rainfall in Spring Summer,Autumn seasons. In
+Winter we consider adding snowfall into the model and interaction between rainfall
+and snowfall.
+
+In this model the main effect is temperature, humidity, windspeed, visibility, 
+dewpoint temperature, solar radiation, snowfall, seasons, holiday, functional day
+
+## 2.2 Distribution of Response Variable
+
+```{r, message=FALSE, echo=FALSE, fig.height=3}
+ggplot(data=bike, aes(x=BikeCount)) + geom_histogram()
+```
+
+The distribution of our response variable reveals that it's skewed to the right. In order to maximize the predictability of the model, we might need some sort of transformation on our response variable. 
+
+## 2.3 Distribution of Explanatory Variables against Response Variable
+
+```{r, message=FALSE, echo=FALSE, fig.height=3}
+bike %>%
+pivot_longer(
+-c(Date,BikeCount,Season,Holiday,FuncDay),
+names_to="xname", values_to="Explanatory_Variables"
+) %>%
+ggplot(aes(x = Explanatory_Variables, y = BikeCount)) + geom_point() +
+facet_wrap(~xname, scales = "free")
+```
+
+## 2.4 Boxplots of Categorical Variables
+
+```{r, echo=F, message=F, fig.height=3}
+b1 <- ggplot(bike, aes(x=Season, y=BikeCount)) + geom_boxplot()
+b2 <- ggplot(bike, aes(x=Holiday, y=BikeCount)) + geom_boxplot()
+b3 <- ggplot(bike, aes(x=FuncDay, y=BikeCount)) + geom_boxplot()
+ggarrange(b1, b2, b3)
+```
+
+We have three categorical variables in the dataset, `Season`, `Holiday` and `Functional Day`. Based on the distributions of the box plots above, we can make some inferences about each categorical variable. For `Season`, we can clearly see that the rental activity during winter is significantly less than other seasons. For `Holiday`, we can observe the pattern that more people are active with sharing bikes during non-holiday periods. Lastly, for `Functional Day`, we have close to 0 rental activity when `FuncDay` is equal to 0 and active sharing when `FuncDay` is equal to 1.
+
+\newpage
+
+## 2.5 Summary Statistics of Quantitative Variables
+
+```{r, message=FALSE, echo=FALSE}
+bike %>% dplyr::select(Temp:Snowfall) %>% summary()
+```
+
+The table above summarizes the key statistics of each quantitative variable. Each variable represents weather condition in Seoul, Korea. 
+
+- `Temp` measures temperature during specific hour in Celsius. The mean `Temp` in the dataset is 12.88292, and the range of `Temp` is from -17.8 to 39.4 degree Celsius. 
+
+- `Humid` measures the humidity of the day. The mean of `Humid` is 58.23 and its range is from 0% to 98%. 
+
+- `WindSpeed` is used to describe how strong the wind is during the day in m/s. The mean of `WindSpeed` is 1.724909, and its range is  from 0 m/s to 7.4 m/s. 
+- `Visibility` measures how far people can see during the day with the unit of 10m. The mean `Visibility` is 1436.826m with the range between 27m and 2000m.
+
+- `DewPointTemp` is the temperature the air needs to be cooled to (at constant pressure) in order to achieve a relative humidity (RH) of 100%. The mean of `DewPointTemp` is 4.073813 Celsius, and its range forms from -30.6 C to 27.2 C.
+
+- `SolarRad` is an abbreviated form of Solar Radiation (MJ/m2) which is a general term for the electromagnetic radiation emitted by the sun. The mean `SolarRad` is 0.5691107 with the range from 0 to 3.52(MJ/m2). 
+- `Rainfall` is the amount of rain during specific hour of the day in mm. The mean `Rainfall` is 0.1486872(mm) and the range is from 0mm to 35mm. 
+- `Snowfall` is the amount of snowfall during the specific hour of the day in cm. The mean `Snowfall` in the dataset is 0.07506849 cm, and it ranges from 0cm to 8.8cm.
+
+## 2.6 Correlations between Explanatory Variables in Matrix and Heatmap Forms
+
+```{r, include=F}
+quant_data <- bike[,c(4,5,6,7,8,9,10,11)]
+ggpairs(quant_data)
+```
+![](img/corMax.png){height=50%}
+Based on the pairs of explanatory variables, we can detect a linear relationship between `Temp` and `DewPointTemp` which means this linear relationship may cause some problems related to multicollinearity.
+
+```{r, message=FALSE, echo=FALSE, include=FALSE}
+
+cormat <- round(cor(quant_data), 2)
+# Get lower triangle of the correlation matrix
+get_lower_tri<-function(cormat){
+  cormat[upper.tri(cormat)] <- NA
+  return(cormat)
+}
+# Get upper triangle of the correlation matrix
+get_upper_tri <- function(cormat){
+  cormat[lower.tri(cormat)]<- NA
+  return(cormat)
+}
+upper_tri <- get_upper_tri(cormat)
+# Melt the correlation matrix
+library(reshape2)
+melted_cormat <- melt(upper_tri, na.rm = TRUE)
+# Heatmap
+library(ggplot2)
+ggplot(data = melted_cormat, aes(Var2, Var1, fill = value))+
+ geom_tile(color = "white")+
+ scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+   midpoint = 0, limit = c(-1,1), space = "Lab", 
+   name="Pearson\nCorrelation") +
+  theme_minimal()+ 
+ theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+    size = 12, hjust = 1)) + coord_fixed()
+reorder_cormat <- function(cormat){
+# Use correlation between variables as distance
+dd <- as.dist((1-cormat)/2)
+hc <- hclust(dd)
+cormat <-cormat[hc$order, hc$order]
+}
+# Reorder the correlation matrix
+cormat <- reorder_cormat(cormat)
+upper_tri <- get_upper_tri(cormat)
+# Melt the correlation matrix
+melted_cormat <- melt(upper_tri, na.rm = TRUE)
+# Create a ggheatmap
+ggheatmap <- ggplot(melted_cormat, aes(Var2, Var1, fill = value))+
+ geom_tile(color = "white")+
+ scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+   midpoint = 0, limit = c(-1,1), space = "Lab", 
+    name="Pearson\nCorrelation") +
+  theme_minimal()+ # minimal theme
+ theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+    size = 12, hjust = 1))+  coord_fixed() 
+```
+
+```{r, message=FALSE, echo=FALSE, fig.height=3, fig.width=10, include=F}
+final_heatmap <- ggheatmap + 
+geom_text(aes(Var2, Var1, label = value), color = "black", size = 4) +
+theme(
+  axis.title.x = element_blank(),
+  axis.title.y = element_blank(),
+  panel.grid.major = element_blank(),
+  panel.border = element_blank(),
+  panel.background = element_blank(),
+  axis.ticks = element_blank(),
+  legend.justification = c(1, 0),
+  legend.position = c(0.6, 0.7),
+  legend.direction = "horizontal")+
+  guides(fill = guide_colorbar(barwidth = 7, barheight = 1,
+                title.position = "top", title.hjust = 0.5))
+final_heatmap
+```
+![](img/heatmap.png)
+
+Based on the correlation heat map above, we can quantitatively verify that the correlation between `Temp` and `DewPointTemp` has the highest value of 0.91 which means there is a strong positive relationship between the two variables.
+
+# 3. Model Selection and Validation
+
+```{r message=F, echo=F}
+fit.full <- lm(BikeCount ~ Temp + Humid + WindSpeed + Visibility + DewPointTemp + SolarRad + Rainfall + Snowfall + factor(Season) + factor(Holiday) + factor(FuncDay), data=bike)
+```
+
+```{r, echo=F}
+glance(fit.full)
+```
+
+The initial main-effect only model without any modification returns a 47% R-squared. Also both AIC and BIC are very high, 132531 and 132637 respectively. We've researched several options to find the most optimal model for the given dataset. 
+
+We first tried to use the log transformation on the response variable just like what we did in the lecture for the case when lambda is equal to 0. However, this approach didn't work because we have zeroes in our observations and $log(0) = -Inf$.
+ 
+Then, we tried several other approaches. The first one is $log(x+1)$ which add a constant to all observations so we would not get $log(0)$. In the end, we found that this is also a kind of box-cox transformation which allows a shift before transformation (called two-parameter box-cox).
+ 
+Next, we also tried IHS transformation because it has been shown that log(x + constant) is actually not a very good option (https://marcfbellemare.com/wordpress/12856 and https://besjournals.onlinelibrary.wiley.com/doi/10.1111/j.2041-210X.2010.00021.x). On the other hand, the IHS transformation is a “newer, widely accepted way” to do that.
+
+Finally, we decided to use box-cox transformation with calculated lambda to transform our response variable. The detailed steps of finding the optimal lambda and transforming the response variable is presented below.
+
+```{r, message=F, echo=F, fig.height=3}
+fit.full.1 <- lm(BikeCount+1 ~ Temp + Humid + WindSpeed + Visibility + DewPointTemp + SolarRad + Rainfall + Snowfall + factor(Season) + factor(Holiday) + factor(FuncDay), data=bike)
+bc = boxcox(fit.full.1)
+mylambda = bc$x[which.max(bc$y)]
+```
+
+The optimal lambda of Box-Cox transformation is 0.141, and we used this lambda to transform the response variable. After the transformation is performed, we have the following results.
+
+```{r, message=F, echo=F}
+y_transformed = (bike$BikeCount)^mylambda 
+fit.bc <- lm(y_transformed ~ Temp + Humid + WindSpeed + Visibility + DewPointTemp + SolarRad + Rainfall + Snowfall + factor(Season) + factor(Holiday) + factor(FuncDay), data=bike)
+glance(fit.bc)
+```
+
+As we can see from the result table above, our new R-squared is 81.33% with AIC of 200.3632 and BIC of 306.5324. Thus, the Box-Cox transformation definitely helped improve the model in terms of R-squared quite significantly while reducing both AIC and BIC. We can further improve the model with `stepAIC` function to remove insignificant variables.
+
+```{r, message=F, echo=F}
+stepAIC(fit.bc, direction="both", trace=F)
+```
+
+```{r, message=F, echo=F}
+fit.final = lm(formula = y_transformed ~ Humid + WindSpeed + Visibility + DewPointTemp + SolarRad + Rainfall + factor(Season) + factor(Holiday) + factor(FuncDay), data = bike)
+```
+
+According to the result of `stepAIC` function, we could remove `Temp` and `Snowfall` from the model while maintaining the same R-squared. Before we finalize our model, we also tested the significance of interaction terms. We added a few interaction terms in the model to see if there is any improvement in terms of R-squared.
+
+```{r, message=F, echo=F}
+fit.final.inter <- lm(formula = y_transformed ~ Humid + WindSpeed + Visibility + DewPointTemp + 
+    SolarRad + Rainfall + factor(Season) + FuncDayNumeric + HolidayNumeric + DewPointTemp:SolarRad + Humid:Rainfall, data=bike)
+
+anova(fit.final.inter)
+```
+
+Based on the table above, the R-squared remained unchanged with multiple interaction terms added. Therefore, we concluded that it's an efficient decision to choose the main-effect only model over the main-effect and interactions model.
+
+# 4. Model Diagnostics
+
+```{r, message=F, echo=F, fig.height=3}
+sp <- ggplot(fit.final, aes(y = .resid, x = .fitted)) + geom_point()
+normal_line <- ggplot(fit.final, aes(sample = .resid)) + stat_qq() + stat_qq_line()
+ggarrange(sp, normal_line)
+```
+
+In this section, we tested the main assumptions of a linear model which are equal variance and normality of errors. As we can see from the plots above, the dataset which constructed the current final model has some violations with the assumptions of the model. The residual plot has two significantly different patterns while the normality QQ line has some deviations on both ends. Therefore, we need to clean some data on our dataset to mitigate these issues.
+
+We used Leverage and Studentized Deleted Residuals to identify outliers from the model which are shown below.
+
+```{r, message=F, echo=F, include=F, warning=F}
+library(ggpubr)
+library(olsrr)
+fit <- fit.final
+p1 <- ols_plot_resid_lev(fit)
+p2 <- ols_plot_resid_stud_fit(fit)
+```
+
+```{r, message=F, echo=F, fig.height=2, warning=FALSE}
+p1
+```
+
+Based on the residual leverage plot, we've identified the outliers from the dataset.
+
+```{r, message=F, echo=F, fig.height=2}
+p2
+```
+
+Based on Studentized Deleted Residual measure, we've also identified the outliers from the dataset. The following shows what happens when we remove the outliers from the dataset and re-fit the model.
+
+```{r, message=F, echo=F, include=F}
+t <- rstudent(fit)
+alpha <- 0.05
+n <- dim(bike)[1]
+p.prime = length(coef(fit))
+t.crit <- qt(1-alpha/(2*n), n - p.prime - 1)
+which(abs(t) > t.crit)
+# leverage
+hii <- hatvalues(fit)
+round(hii,2)
+which(hii > 2*p.prime/n)
+which(hii > 0.5)
+```
+
+```{r, message=F, echo=F, include=F}
+DFFITTS <- dffits(fit)
+which(DFFITTS > 1) 
+D = cooks.distance(fit)
+which(D > qf(0.2, p.prime, n-p.prime))
+DFBETAS <- dfbetas(fit)
+head(DFBETAS)
+which(abs(DFBETAS) > 2/sqrt(8760))
+bike$hii = hii
+bike$t = t
+bike$DFFITTS = DFFITTS
+bike$DFBETAS = apply(abs(DFBETAS),1,FUN = max)
+bike.new = subset(bike,!hii > 2*p.prime/n & !abs(t)> t.crit) # remove outliers using hii and t
+bike.new = subset(bike.new,!DFFITTS > 1&!DFBETAS> 2/sqrt(8760)) # remove influential obs.
+```
+
+```{r, message=F, echo=F, include=F}
+#New Full model
+fit.full.new <- lm(BikeCount+1 ~ Temp + Humid + WindSpeed + Visibility + DewPointTemp + SolarRad + Rainfall + Snowfall + factor(Season) + FuncDayNumeric + HolidayNumeric, data=bike.new)
+bc.new = boxcox(fit.full.new)
+mylambda.new = bc.new$x[which.max(bc.new$y)]
+```
+
+```{r, message=F, echo=F}
+#box-cox with calculated lambda
+newY_transformed = (bike.new$BikeCount)^mylambda.new
+fit.final.new =lm(newY_transformed ~ Humid + WindSpeed + Visibility + DewPointTemp + SolarRad + Rainfall + Snowfall + factor(Season) + HolidayNumeric, data = bike.new)
+```
+
+
+```{r, message=F, echo=F, fig.height=3}
+sp.new <- ggplot(fit.final.new, aes(y = .resid, x = .fitted)) + geom_point()
+qq.new <- ggplot(fit.final.new, aes(sample = .resid)) + stat_qq() + stat_qq_line()
+ggarrange(sp.new, qq.new)
+```
+
+Based on the new residual plot and new normal QQ line plot, it's clear that we've successfully fixed the violations of the linear regression assumptions with the residual plot and the normal QQ line. The new residual plot no longer has the straight line pattern on the left and most of the points are scattered around 0 without any specific pattern. For the normal QQ line, the end-behaviors have been mitigated causing the shape of the line look more straight.
+
+```{r, message=F, echo=F}
+glance(fit.final.new)
+```
+
+Based on the summary of the new fit model, the R-squared of the new model without outliers reduced to 74% from 81%. However, we still believe that 74% R-squared is still high enough to justify removing the outliers and preserving the linear regression assumptions. Therefore, our remedial actions can be justified.
+
+# 6. Conclusion
+
+From this project, we’ve learned that the main-effect only model with just Box-Cox transformation have enough evidence to predict the number of rental bikes from the weather data with the average R-squared of 78%. Also, quantitative variables such as `Humid`, `WindSpeed`, `Visibility`, `Dew Point Temperature`, `Rainfall`, `Seasons`, `Holiday` and `Functional Day` are significant predictors of the number of rental bikes in Seoul. In order to make sure our linear model is a valid model, we needed to check the core assumptions of the model which are equal variance of the errors and the normality of the errors. In order to correct the assumptions, we used different kinds of measures learned from the lectures to identify outlying and influential observations. With proper modification of the dataset, we were able to ensure the model assumptions and make the model more reliable for its purposes. 
+
+In terms of limitations, a linear model usually works well when the dataset has reasonable linear relationship between a model's response variable and its explanatory variables. When the dataset doesn't have a clear linear relation, it's difficult to see meaningful results from applying linear regression techniques. Moreover, we can utilize advanced data cleansing techniques and feature engineering to make the dataset more suitable for linear models but sometimes it's more effective to apply non-linear prediction techniques or machine learning algorithms which may be more appropriate. In the real world, practitioners in the field are equipped with advanced regression techniques for various types of dataset and nowadays machine learning is one of the hottest fields for generating useful insights from big data.
+
+# 7. References
+
+GGPLOT2 : Quick correlation matrix heatmap - R software and Data Visualization. STHDA. (n.d.). Retrieved April 7, 2022, from http://www.sthda.com/english/wiki/ggplot2-quick-correlation-matrix-heatmap-r-software-and-data-visualization 
+
+Gov, E. (n.d.). Solar radiation basics. Energy.gov. Retrieved April 7, 2022, from https://www.energy.gov/eere/solar/solar-radiation-basics 
+
+Colier, N. (n.d.) Replace values in R, "yes" to 1 and "no" to 0. Retrieved April 7, 2022, from https://stackoverflow.com/questions/43986118/replace-values-in-r-yes-to-1-and-no-to-0
+
+O’Hara, R.B. and Kotze, D.J. (2010), Do not log-transform count data. Methods in Ecology and Evolution, 1: 118-122. https://doi.org/10.1111/j.2041-210X.2010.00021.x
+
+Box, George E. P.; Cox, D. R. (1964). "An analysis of transformations". Journal of the Royal Statistical Society, Series B. 26 (2): 211–252. JSTOR 2984418. MR 0192611. https://www.jstor.org/stable/2984418
+
